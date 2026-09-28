@@ -20,16 +20,47 @@
       .replace(/\s+/g," ");
   }
 
-  function dupGroups(){
-    const m = new Map();
-    customers.forEach(c=>{
-      const k = normCompany(c.company);
-      if(!k) return;
-      if(!m.has(k)) m.set(k,[]);
-      m.get(k).push(c);
-    });
-    return [...m.values()].filter(g=>g.length>1).sort((a,b)=>b.length-a.length);
-  }
+  function normContact(s){
+  return String(s||"")
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g," ")
+    .trim()
+    .replace(/\s+/g," ");
+}
+
+function isPlaceholderCompany(s){
+  const x=String(s||"").trim().toLowerCase();
+  return [
+    "公司待补",
+    "公司未确认",
+    "未确认公司",
+    "待确认公司",
+    "待补",
+    "未确认",
+    "unknown",
+    "unknown company"
+  ].includes(x);
+}
+
+function dupGroups(){
+  const m=new Map();
+
+  customers.forEach(c=>{
+    const company=normCompany(c.company);
+    const contact=normContact(c.contact);
+
+    if(!company || !contact || isPlaceholderCompany(c.company)) return;
+
+    const k=company+"||"+contact;
+
+    if(!m.has(k)) m.set(k,[]);
+    m.get(k).push(c);
+  });
+
+  return [...m.values()]
+    .filter(g=>g.length>1)
+    .sort((a,b)=>b.length-a.length);
+}
 
   function allClientText(c){
     const ev = activities
@@ -172,7 +203,7 @@
     if(!$("v2Total")) return;
     const groups = dupGroups();
     const uniqueCompanies = new Set(customers.map(c=>normCompany(c.company)).filter(Boolean)).size;
-    const dupRecords = groups.reduce((n,g)=>n+g.length,0);
+    const dupRecords = groups.reduce((n,g)=>n+(g.length-1),0);
     $("v2Total").textContent = customers.length;
     $("v2Companies").textContent = uniqueCompanies;
     $("v2DupRecords").textContent = dupRecords;
