@@ -1,0 +1,15 @@
+{
+  "name": "Stella AI Sales OS",
+  "short_name": "Stella Sales",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f7f9",
+  "theme_color": "#0b7a53",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

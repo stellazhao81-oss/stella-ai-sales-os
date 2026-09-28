@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="theme-color" content="#0b7a53"/>
+  <title>Stella AI Sales OS</title>
+  <meta name="description" content="Cloud CRM for foreign trade sales"/>
+  <link rel="manifest" href="manifest.webmanifest"/>
+  <link rel="icon" href="icon.svg" type="image/svg+xml"/>
+  <link rel="stylesheet" href="styles.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<div id="authGate" class="auth-gate">
+  <div class="auth-card">
+    <div class="brand-mark">S</div>
+    <h1>Stella AI Sales OS</h1>
+    <p class="muted">云端外贸 CRM · 同账号跨电脑同步</p>
+    <div id="setupNotice" class="setup-notice hidden">
+      首次部署请先配置 <code>config.js</code> 中的 Supabase URL 与 anon key。
+    </div>
+    <label>邮箱<input id="loginEmail" class="input" type="email" placeholder="you@example.com"/></label>
+    <label>密码<input id="loginPassword" class="input" type="password" placeholder="至少 6 位"/></label>
+    <div class="row">
+      <button id="loginBtn" class="btn primary grow">登录</button>
+      <button id="registerBtn" class="btn ghost">注册</button>
+    </div>
+    <div id="authMsg" class="hint"></div>
+  </div>
+</div>
+
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">S</div>
+      <div><b>Stella AI Sales OS</b><small>Cloud CRM</small></div>
+    </div>
+    <nav>
+      <button class="nav active" data-view="dashboard">🏠 今日工作台</button>
+      <button class="nav" data-view="customers">👥 客户池</button>
+      <button class="nav" data-view="followups">⏰ 跟进任务</button>
+      <button class="nav" data-view="knowledge">🧱 产品知识库</button>
+      <button class="nav" data-view="import">📥 Excel 导入</button>
+      <button class="nav" data-view="settings">⚙️ 设置</button>
+    </nav>
+    <div class="side-bottom">
+      <div class="online-dot"><span></span>云端在线</div>
+      <div id="userEmail" class="user-email"></div>
+      <button id="logoutBtn" class="nav danger-nav">退出登录</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div><h1 id="pageTitle">今日工作台</h1><p id="pageSub">先处理最接近成交的客户。</p></div>
+      <div class="row">
+        <button id="quickImportBtn" class="btn ghost">导入 Excel</button>
+        <button id="addCustomerBtn" class="btn primary">＋ 新增客户</button>
+      </div>
+    </header>
+
+    <section id="dashboardView" class="view active">
+      <div class="stats">
+        <div class="stat"><span>今日需跟进</span><b id="sDue">0</b><small>含逾期</small></div>
+        <div class="stat"><span>A 类客户</span><b id="sA">0</b><small>高优先级</small></div>
+        <div class="stat"><span>项目中</span><b id="sProject">0</b><small>Project</small></div>
+        <div class="stat"><span>报价中</span><b id="sQuoted">0</b><small>Quoted</small></div>
+        <div class="stat"><span>等待回复</span><b id="sWaiting">0</b><small>Waiting Reply</small></div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Today's Priority</h2><p>优先级 + 到期时间排序</p></div><button class="linkbtn" data-goto="followups">查看任务</button></div>
+          <div id="priorityList"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><h2>今日销售策略</h2><p>按你当前客户池自动总结</p></div></div>
+          <div id="strategyBox" class="strategy"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="customersView" class="view">
+      <div class="panel">
+        <div class="toolbar">
+          <input id="search" class="input grow" placeholder="搜索公司 / 联系人 / 国家 / 产品 / 标签"/>
+          <select id="statusFilter" class="input select">
+            <option value="">全部状态</option>
+            <option>Developing</option><option>Replied</option><option>Waiting Reply</option>
+            <option>Quoted</option><option>Sample</option><option>Project</option><option>Won</option><option>Nurture</option>
+          </select>
+          <select id="priorityFilter" class="input select">
+            <option value="">全部优先级</option><option>A</option><option>B</option><option>C</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>公司 / 联系人</th><th>国家</th><th>产品</th><th>状态</th><th>优先级</th><th>最后联系</th><th>下次跟进</th><th></th></tr></thead>
+            <tbody id="customerRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="followupsView" class="view">
+      <div class="panel">
+        <div class="panel-head"><div><h2>跟进任务</h2><p>所有到期与未来任务</p></div></div>
+        <div class="tabs">
+          <button class="tab active" data-taskfilter="due">到期 / 逾期</button>
+          <button class="tab" data-taskfilter="upcoming">未来 7 天</button>
+          <button class="tab" data-taskfilter="all">全部</button>
+        </div>
+        <div id="taskList"></div>
+      </div>
+    </section>
+
+    <section id="knowledgeView" class="view">
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><div><h2>产品知识库</h2><p>AI / 业务回复时统一参考</p></div><button id="addKnowledgeBtn" class="btn primary">＋ 新增</button></div>
+          <div id="knowledgeList"></div>
+        </div>
+        <div class="panel">
+          <h2>常用基础资料</h2>
+          <div class="knowledge-static">
+            <p><b>标准尺寸：</b>3200×1600 / 2700×1800 / 1200×2700 / 1200×2400 mm</p>
+            <p><b>常见厚度：</b>6 / 9 / 12 / 15 / 18 / 20 mm</p>
+            <p><b>常规交期：</b>7–10 天；定制约 10–22 天</p>
+            <p><b>包装：</b>H 型木架 / 木箱</p>
+            <p><b>说明：</b>这里可继续补充价格、装柜、加工、证书等真实数据。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="importView" class="view">
+      <div class="panel">
+        <div class="panel-head"><div><h2>Excel 批量导入</h2><p>支持 .xlsx / .xls / .csv</p></div></div>
+        <div class="dropzone" id="dropzone">
+          <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" hidden/>
+          <div class="drop-icon">📥</div>
+          <h3>拖入 Excel，或点击选择文件</h3>
+          <p>建议列名：公司 / 联系人 / 国家 / 职位 / 来源 / 产品 / 状态 / 优先级 / 最后联系 / 下次跟进 / 卡点 / 备注 / 标签</p>
+          <button id="chooseExcelBtn" class="btn primary">选择文件</button>
+        </div>
+        <div id="importPreview" class="hidden">
+          <div class="panel-head top-gap"><div><h3>预览</h3><p id="importCount"></p></div><button id="confirmImportBtn" class="btn primary">确认导入</button></div>
+          <div class="table-wrap"><table><thead id="previewHead"></thead><tbody id="previewBody"></tbody></table></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="settingsView" class="view">
+      <div class="grid-2">
+        <div class="panel">
+          <h2>账号</h2>
+          <p><b>当前账号：</b><span id="settingsEmail"></span></p>
+          <p class="muted">同一账号可在不同电脑登录并同步数据。</p>
+        </div>
+        <div class="panel">
+          <h2>数据备份</h2>
+          <p class="muted">建议定期导出 JSON 做第二份备份。</p>
+          <button id="exportBtn" class="btn ghost">导出 JSON 备份</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="backdrop" data-close></div>
+  <div class="modal-card">
+    <div class="modal-head">
+      <div><h2 id="modalTitle">客户</h2><p id="modalSub"></p></div>
+      <button class="iconbtn" data-close>✕</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
