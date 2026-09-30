@@ -2348,6 +2348,151 @@ quickLog = async function(c) {
 console.log(
   "Stella AI Sales OS V2.2.1 patch loaded."
 );
+/* =========================================================
+   V2.2.2 FIX
+   Recalculate next follow-up correctly after "followed today"
+========================================================= */
+
+const v222PreviousQuickLog = quickLog;
+
+quickLog = async function(c) {
+
+  const oldRound = v22Round(c);
+
+  /*
+    Run previous logic first so activity history
+    and other existing behavior are preserved.
+  */
+  await v222PreviousQuickLog(c);
+
+  const today = v22Today();
+
+  c.lastContact = today;
+
+
+  /*
+    Cold outreach cadence
+    Developing / Waiting Reply only
+  */
+  if (
+    c.status === "Developing" ||
+    c.status === "Waiting Reply"
+  ) {
+
+    const newRound = oldRound + 1;
+
+    c.followupRound = newRound;
+    c.followup_round = newRound;
+
+    c.nextFollowup =
+      v22NextDateAfterTouch(
+        newRound,
+        today
+      );
+  }
+
+  /*
+    Customer has already replied:
+    active conversation -> 3 BUSINESS DAYS
+  */
+  else if (c.status === "Replied") {
+
+    c.nextFollowup =
+      v22AddBusinessDays(
+        today,
+        3
+      );
+  }
+
+  /*
+    Active project:
+    keep momentum -> 2 BUSINESS DAYS
+  */
+  else if (c.status === "Project") {
+
+    c.nextFollowup =
+      v22AddBusinessDays(
+        today,
+        2
+      );
+  }
+
+  /*
+    Quote / Sample:
+    enough review time -> 3 BUSINESS DAYS
+  */
+  else if (
+    c.status === "Quoted" ||
+    c.status === "Sample"
+  ) {
+
+    c.nextFollowup =
+      v22AddBusinessDays(
+        today,
+        3
+      );
+  }
+
+  /*
+    Nurture / other:
+    weekly
+  */
+  else {
+
+    c.nextFollowup =
+      v22AddCalendarDays(
+        today,
+        7
+      );
+  }
+
+
+  /*
+    Final weekend protection
+  */
+  c.nextFollowup =
+    v22NormalizeFollowupDate(
+      c.nextFollowup
+    );
+
+
+  /*
+    Persist the corrected date
+  */
+  if (
+    typeof persistCustomer === "function"
+  ) {
+    await persistCustomer(c);
+  }
+
+
+  if (
+    typeof renderAll === "function"
+  ) {
+    renderAll();
+  }
+
+
+  if (
+    typeof showToast === "function"
+  ) {
+    showToast(
+      `已记录今天跟进；下次跟进：${c.nextFollowup}`
+    );
+  }
+  else if (
+    typeof toast === "function"
+  ) {
+    toast(
+      `已记录今天跟进；下次跟进：${c.nextFollowup}`
+    );
+  }
+};
+
+
+console.log(
+  "Stella AI Sales OS V2.2.2 next-date fix loaded."
+);
   console.log(
     "Stella AI Sales OS V2.2 loaded successfully."
   );
