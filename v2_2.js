@@ -2349,52 +2349,63 @@ console.log(
   "Stella AI Sales OS V2.2.1 patch loaded."
 );
 /* =========================================================
-   V2.2.2 FIX
-   Recalculate next follow-up correctly after "followed today"
+   V2.2.3 FINAL FOLLOW-UP DATE FIX
+   Do NOT call old quickLog anymore.
 ========================================================= */
-
-const v222PreviousQuickLog = quickLog;
 
 quickLog = async function(c) {
 
-  const oldRound = v22Round(c);
-
-  /*
-    Run previous logic first so activity history
-    and other existing behavior are preserved.
-  */
-  await v222PreviousQuickLog(c);
-
   const today = v22Today();
+
+  const currentRound = v22Round(c);
 
   c.lastContact = today;
 
 
-  /*
-    Cold outreach cadence
-    Developing / Waiting Reply only
-  */
+  /* Cold development customers */
   if (
     c.status === "Developing" ||
     c.status === "Waiting Reply"
   ) {
 
-    const newRound = oldRound + 1;
+    const newRound = currentRound + 1;
 
     c.followupRound = newRound;
     c.followup_round = newRound;
 
-    c.nextFollowup =
-      v22NextDateAfterTouch(
-        newRound,
-        today
-      );
+    /*
+      Initial outreach sent -> 3 business days
+      Follow-up #1 sent     -> 5 business days
+      Follow-up #2+         -> 7 calendar days
+    */
+    if (newRound === 1) {
+
+      c.nextFollowup =
+        v22AddBusinessDays(
+          today,
+          3
+        );
+
+    } else if (newRound === 2) {
+
+      c.nextFollowup =
+        v22AddBusinessDays(
+          today,
+          5
+        );
+
+    } else {
+
+      c.nextFollowup =
+        v22AddCalendarDays(
+          today,
+          7
+        );
+    }
   }
 
-  /*
-    Customer has already replied:
-    active conversation -> 3 BUSINESS DAYS
-  */
+
+  /* Customer replied */
   else if (c.status === "Replied") {
 
     c.nextFollowup =
@@ -2404,10 +2415,8 @@ quickLog = async function(c) {
       );
   }
 
-  /*
-    Active project:
-    keep momentum -> 2 BUSINESS DAYS
-  */
+
+  /* Active project */
   else if (c.status === "Project") {
 
     c.nextFollowup =
@@ -2417,10 +2426,8 @@ quickLog = async function(c) {
       );
   }
 
-  /*
-    Quote / Sample:
-    enough review time -> 3 BUSINESS DAYS
-  */
+
+  /* Quotation / Sample */
   else if (
     c.status === "Quoted" ||
     c.status === "Sample"
@@ -2433,10 +2440,8 @@ quickLog = async function(c) {
       );
   }
 
-  /*
-    Nurture / other:
-    weekly
-  */
+
+  /* Nurture / other */
   else {
 
     c.nextFollowup =
@@ -2447,18 +2452,14 @@ quickLog = async function(c) {
   }
 
 
-  /*
-    Final weekend protection
-  */
+  /* Final weekend protection */
   c.nextFollowup =
     v22NormalizeFollowupDate(
       c.nextFollowup
     );
 
 
-  /*
-    Persist the corrected date
-  */
+  /* Save to Supabase */
   if (
     typeof persistCustomer === "function"
   ) {
@@ -2466,6 +2467,7 @@ quickLog = async function(c) {
   }
 
 
+  /* Refresh dashboard */
   if (
     typeof renderAll === "function"
   ) {
@@ -2473,23 +2475,55 @@ quickLog = async function(c) {
   }
 
 
+  const msg =
+    `已记录今天跟进；下次跟进：${c.nextFollowup}`;
+
   if (
     typeof showToast === "function"
   ) {
-    showToast(
-      `已记录今天跟进；下次跟进：${c.nextFollowup}`
-    );
+    showToast(msg);
   }
   else if (
     typeof toast === "function"
   ) {
-    toast(
-      `已记录今天跟进；下次跟进：${c.nextFollowup}`
-    );
+    toast(msg);
   }
 };
 
 
+/* Fix round label for non-cold customers */
+const v223OldRoundLabel =
+  v22RoundLabel;
+
+v22RoundLabel = function(c) {
+
+  if (c.status === "Replied") {
+    return "Customer replied / active conversation";
+  }
+
+  if (c.status === "Project") {
+    return "Active project";
+  }
+
+  if (c.status === "Quoted") {
+    return "Quotation sent";
+  }
+
+  if (c.status === "Sample") {
+    return "Sample stage";
+  }
+
+  if (c.status === "Nurture") {
+    return "Nurture";
+  }
+
+  return v223OldRoundLabel(c);
+};
+
+
+console.log(
+  "Stella AI Sales OS V2.2.3 final date fix loaded."
+);
 console.log(
   "Stella AI Sales OS V2.2.2 next-date fix loaded."
 );
