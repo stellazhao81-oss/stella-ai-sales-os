@@ -1839,7 +1839,515 @@ If now isn’t a good time, I’m happy to follow up by email.`;
     }
   }
 
+/* =========================================================
+   V2.2.1 PATCH
+   1. Today's Priority = only customers actually due today/overdue
+   2. Customers already followed today disappear immediately
+   3. Never expose Chinese/internal notes in customer-facing drafts
+========================================================= */
 
+
+/* ---------- SAFE PRODUCT NAME ---------- */
+
+function v221SafeProduct(c) {
+
+  const raw = String(c.product || "").trim();
+
+  if (!raw) {
+    return "stone and surface materials";
+  }
+
+  const lower = raw.toLowerCase();
+
+  /*
+    Extract actual product categories instead of using
+    internal notes stored accidentally in the product field.
+  */
+
+  if (
+    lower.includes("sintered stone") &&
+    lower.includes("quartz")
+  ) {
+    return "stone, quartz and sintered stone";
+  }
+
+  if (lower.includes("sintered stone")) {
+    return "sintered stone";
+  }
+
+  if (
+    lower.includes("engineered marble") ||
+    lower.includes("artificial marble")
+  ) {
+    return "engineered marble";
+  }
+
+  if (lower.includes("quartz")) {
+    return "quartz surfaces";
+  }
+
+  if (
+    lower.includes("natural stone") ||
+    lower.includes("granite") ||
+    lower.includes("marble")
+  ) {
+    return "stone materials";
+  }
+
+  /*
+    If Chinese characters or obvious internal-action wording
+    exist, never send the raw value to the customer.
+  */
+  if (
+    /[\u4e00-\u9fff]/.test(raw) ||
+    /确认|采购|样品|报价|跟进|客户|再推/.test(raw) ||
+    raw.length > 70
+  ) {
+    return "stone and surface materials";
+  }
+
+  return raw;
+}
+
+
+/* Override the old product helper */
+v22Product = function(c) {
+  return v221SafeProduct(c);
+};
+
+
+/* ---------- DID WE ALREADY FOLLOW TODAY? ---------- */
+
+function v221FollowedToday(c) {
+
+  const today = v22Today();
+
+  /*
+    Fastest check:
+    customer last-contact was updated today.
+  */
+  if (c.lastContact === today) {
+    return true;
+  }
+
+  /*
+    Also inspect activity timeline.
+  */
+  if (
+    typeof activities !== "undefined" &&
+    Array.isArray(activities)
+  ) {
+
+    return activities.some(a => {
+
+      if (a.customer_id !== c.id) {
+        return false;
+      }
+
+      const activityDate =
+        String(
+          a.activity_date ||
+          a.date ||
+          ""
+        ).slice(0, 10);
+
+      return activityDate === today;
+    });
+  }
+
+  return false;
+}
+
+
+/* ---------- ACTUALLY DUE CUSTOMERS ---------- */
+
+function v221DueCustomers() {
+
+  const today = v22Today();
+
+  return customers
+    .filter(c => {
+
+      if (c.status === "Won") {
+        return false;
+      }
+
+      if (!c.nextFollowup) {
+        return false;
+      }
+
+      const due =
+        v22NormalizeFollowupDate(
+          c.nextFollowup
+        );
+
+      /*
+        Today + overdue are actionable.
+      */
+      if (due > today) {
+        return false;
+      }
+
+      /*
+        If Stella already followed this customer today,
+        it must disappear from Today's Priority.
+      */
+      if (v221FollowedToday(c)) {
+        return false;
+      }
+
+      return true;
+    })
+    .sort((a, b) => {
+
+      /*
+        1. A before B before C
+      */
+      const priorityScore = {
+        A: 0,
+        B: 1,
+        C: 2
+      };
+
+      const pa =
+        priorityScore[a.priority] ?? 3;
+
+      const pb =
+        priorityScore[b.priority] ?? 3;
+
+      if (pa !== pb) {
+        return pa - pb;
+      }
+
+      /*
+        2. Project / Quoted / Sample first
+      */
+      const stageScore = {
+        Project: 0,
+        Quoted: 1,
+        Sample: 2,
+        Replied: 3,
+        "Waiting Reply": 4,
+        Developing: 5,
+        Nurture: 6
+      };
+
+      const sa =
+        stageScore[a.status] ?? 9;
+
+      const sb =
+        stageScore[b.status] ?? 9;
+
+      if (sa !== sb) {
+        return sa - sb;
+      }
+
+      /*
+        3. Oldest overdue date first
+      */
+      return String(
+        a.nextFollowup
+      ).localeCompare(
+        String(b.nextFollowup)
+      );
+    });
+}
+
+
+/* ---------- OVERRIDE TODAY'S PRIORITY ---------- */
+
+renderPriority = function() {
+
+  const host =
+    $("priorityList");
+
+  if (!host) return;
+
+  host.innerHTML = "";
+
+  const allDue =
+    v221DueCustomers();
+
+  /*
+    Daily execution target remains maximum 30.
+    But ONLY genuinely due customers can enter this list.
+  */
+  const display =
+    allDue.slice(0, 30);
+
+
+  /*
+    Update dashboard count.
+  */
+  const todayCount =
+    document.getElementById("v21Today");
+
+  if (todayCount) {
+    todayCount.textContent =
+      display.length;
+  }
+
+
+  const sDue =
+    $("sDue");
+
+  if (sDue) {
+    sDue.textContent =
+      display.length;
+  }
+
+
+  const label =
+    document.createElement("div");
+
+  label.className =
+    "v21-mode-label";
+
+  label.textContent =
+    `今天必须跟进 · ${display.length} 个`;
+
+  host.appendChild(label);
+
+
+  if (!display.length) {
+
+    host.insertAdjacentHTML(
+      "beforeend",
+      `
+      <div class="strategy">
+        <strong>今天没有到期客户。</strong><br>
+        今天已经完成的客户不会继续出现在这里。
+        可以把剩余时间用于新客户开发。
+      </div>
+      `
+    );
+
+    return;
+  }
+
+
+  display.forEach(c => {
+
+    const ai =
+      nextStep(c);
+
+    const d =
+      document.createElement("div");
+
+    d.className =
+      "priority";
+
+
+    const dueDate =
+      v22NormalizeFollowupDate(
+        c.nextFollowup
+      );
+
+
+    let dateLabel =
+      dueDate;
+
+    if (dueDate < v22Today()) {
+      dateLabel =
+        `${dueDate} · 已逾期`;
+    }
+
+
+    d.innerHTML = `
+
+      <div>
+
+        <div class="company">
+          ${esc(c.company)}
+        </div>
+
+        <div class="sub">
+          ${esc(c.contact || "—")}
+          ·
+          ${esc(c.country || "")}
+        </div>
+
+        <div class="sub">
+          ${esc(ai.action)}
+        </div>
+
+      </div>
+
+      <div>
+        ${badge(c.status)}
+      </div>
+
+      <div>
+        ${badge(c.priority, c.priority)}
+      </div>
+
+      <div>
+        ${dateLabel}
+      </div>
+
+      <div>›</div>
+    `;
+
+
+    d.onclick =
+      () => openCustomer(c.id);
+
+
+    host.appendChild(d);
+  });
+};
+
+
+/* ---------- OVERRIDE TODAY COUNT ---------- */
+
+const v221OldRenderStats =
+  renderStats;
+
+renderStats = function() {
+
+  v221OldRenderStats();
+
+  const due =
+    v221DueCustomers();
+
+  if ($("sDue")) {
+    $("sDue").textContent =
+      Math.min(due.length, 30);
+  }
+};
+
+
+/* ---------- STRATEGY BOX USES REAL DUE CUSTOMERS ---------- */
+
+renderStrategy = function() {
+
+  const due =
+    v221DueCustomers()
+      .slice(0, 30);
+
+
+  const project =
+    due.filter(
+      c => c.status === "Project"
+    ).length;
+
+  const quoted =
+    due.filter(
+      c => c.status === "Quoted"
+    ).length;
+
+  const sample =
+    due.filter(
+      c => c.status === "Sample"
+    ).length;
+
+  const replied =
+    due.filter(
+      c => c.status === "Replied"
+    ).length;
+
+  const waiting =
+    due.filter(
+      c =>
+        c.status ===
+        "Waiting Reply"
+    ).length;
+
+
+  if (!$("strategyBox")) {
+    return;
+  }
+
+
+  $("strategyBox").innerHTML = `
+
+    <strong>
+      今天的执行清单：
+    </strong>
+    <br>
+
+    今天真正到期且尚未跟进的客户：
+    <b>${due.length}</b> 个。
+
+    <br><br>
+
+    Project ${project} 个 ·
+    Quoted ${quoted} 个 ·
+    Sample ${sample} 个 ·
+    Replied ${replied} 个 ·
+    Waiting Reply ${waiting} 个。
+
+    <br><br>
+
+    <strong>
+      建议顺序：
+    </strong>
+
+    先处理项目 / 报价 / 样品客户，
+    再处理已回复客户，
+    最后处理冷开发等待回复客户。
+
+    <br><br>
+
+    <strong>
+      已完成客户：
+    </strong>
+
+    今天一旦记录“已跟进”，
+    会立即从今日列表移除并进入下一次跟进日期。
+  `;
+};
+
+
+/* ---------- AFTER QUICK LOG, REMOVE FROM TODAY IMMEDIATELY ---------- */
+
+const v221QuickLog =
+  quickLog;
+
+quickLog = async function(c) {
+
+  await v221QuickLog(c);
+
+  /*
+    Ensure today's date is definitely persisted,
+    so this customer disappears from Today's Priority.
+  */
+  c.lastContact =
+    v22Today();
+
+
+  if (
+    typeof persistCustomer === "function"
+  ) {
+    await persistCustomer(c);
+  }
+
+
+  if (
+    typeof renderAll === "function"
+  ) {
+    renderAll();
+  }
+
+
+  /*
+    If customer detail is still open,
+    refresh the detail panel.
+  */
+  if (
+    typeof openCustomer === "function"
+  ) {
+
+    try {
+      openCustomer(c.id);
+    } catch (_) {}
+  }
+};
+
+
+console.log(
+  "Stella AI Sales OS V2.2.1 patch loaded."
+);
   console.log(
     "Stella AI Sales OS V2.2 loaded successfully."
   );
